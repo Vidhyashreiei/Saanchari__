@@ -1,56 +1,78 @@
 import streamlit as st
-from openai import OpenAI
+import google.generativeai as genai
+from PIL import Image
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+# Streamlit UI setup
+st.set_page_config(page_title="Saanchari - AP Tourism Chatbot", layout="wide")
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+st.title("🗺️ Saanchari - Andhra Pradesh Tourism Chatbot")
+#st.caption("Powered by Google Gemini | Developed by Kshipani Tech Ventures Pvt Ltd")
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+st.markdown("""
+<style>
+    .stChatMessage { margin-bottom: 1rem; }
+    .user-msg { background: linear-gradient(135deg, #F75768 0%, #FB6957 100%); color: white; padding: 1rem; border-radius: 12px 12px 0 12px; }
+    .bot-msg { background: linear-gradient(135deg, #07546B 0%, #0A6B7D 100%); color: white; padding: 1rem; border-radius: 12px 12px 12px 0; }
+    .header { font-size: 2rem; font-weight: bold; color: #07546B; }
+    .footer { font-size: 0.85rem; color: #888888; text-align: center; margin-top: 2rem; }
+</style>
+""", unsafe_allow_html=True)
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+# Embed Gemini API key directly
+GEMINI_API_KEY = "AIzaSyCkt9a84fx7gXwMuREXVE05XAKpNgAJw_s"   #Gemini API key
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-1.5-pro")
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+# Built-in questions
+builtin_questions = [
+    "What are the top tourist attractions in Andhra Pradesh?",
+    "Tell me about the famous food in Andhra Pradesh.",
+    "What is the best time to visit Andhra Pradesh?"
+]
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+# Initialize session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+# Built-in question buttons
+st.subheader("Quick Questions")
+col1, col2, col3 = st.columns(3)
+if col1.button(builtin_questions[0]):
+    st.session_state.messages.append({"role": "user", "content": builtin_questions[0]})
+if col2.button(builtin_questions[1]):
+    st.session_state.messages.append({"role": "user", "content": builtin_questions[1]})
+if col3.button(builtin_questions[2]):
+    st.session_state.messages.append({"role": "user", "content": builtin_questions[2]})
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+# Show chat history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        if message["role"] == "user":
+            st.markdown(f"<div class='user-msg'>{message['content']}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div class='bot-msg'>{message['content']}</div>", unsafe_allow_html=True)
+
+# Chat input
+if prompt := st.chat_input("Ask something about Andhra Pradesh Tourism..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+# Generate response for new user message
+if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            try:
+                response = model.generate_content(st.session_state.messages[-1]["content"])
+                reply = response.text.strip()
+            except Exception as e:
+                reply = f"⚠️ Gemini API Error: {str(e)}"
+            st.markdown(f"<div class='bot-msg'>{reply}</div>", unsafe_allow_html=True)
+            st.session_state.messages.append({"role": "assistant", "content": reply})
+
+# Sticky footer at the bottom
+st.markdown("""
+<div style='position: fixed; bottom: 0; left: 0; right: 0; background-color: #FFFFFF; 
+            border-top: 1px solid #CFD1D1; padding: 0.5rem; text-align: center; z-index: 999;'>
+    <small style='color: #07546B;'>© 2025 Kshipani Tech Ventures Pvt Ltd. All rights reserved.</small>
+</div>
+""", unsafe_allow_html=True)
