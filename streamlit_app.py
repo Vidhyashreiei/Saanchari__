@@ -1,28 +1,65 @@
 import streamlit as st
 import google.generativeai as genai
+
 from PIL import Image
+import os
+from dotenv import load_dotenv
+from googletrans import Translator
 
-# Streamlit UI setup
-st.set_page_config(page_title="Saanchari - AP Tourism Chatbot", layout="wide")
-
-st.title("🗺️ Saanchari - Andhra Pradesh Tourism Chatbot")
-#st.caption("Powered by Google Gemini | Developed by Kshipani Tech Ventures Pvt Ltd")
-
-st.markdown("""
-<style>
-    .stChatMessage { margin-bottom: 1rem; }
-    .user-msg { background: linear-gradient(135deg, #F75768 0%, #FB6957 100%); color: white; padding: 1rem; border-radius: 12px 12px 0 12px; }
-    .bot-msg { background: linear-gradient(135deg, #07546B 0%, #0A6B7D 100%); color: white; padding: 1rem; border-radius: 12px 12px 12px 0; }
-    .header { font-size: 2rem; font-weight: bold; color: #07546B; }
-    .footer { font-size: 0.85rem; color: #888888; text-align: center; margin-top: 2rem; }
-</style>
-""", unsafe_allow_html=True)
-
-# Embed Gemini API key directly
-GEMINI_API_KEY = "AIzaSyCkt9a84fx7gXwMuREXVE05XAKpNgAJw_s"   #Gemini API key
+# Load environment variables from .env file
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-pro")
+
+# Streamlit UI setup
+st.set_page_config(page_title="Saanchari", layout="wide")
+
+# Place a compact language selector next to the title (top right)
+st.markdown("""
+    <style>
+        .title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+          /* Language selector styling ↓↓↓ */
+        .lang-select {
+            background: #fff;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            padding: 0.1rem 0.45rem;        /* smaller padding */
+            min-width: 110px;               /* downsized width */
+            font-size: 0.9rem;              /* ≈14 px */
+        }
+        .lang-select label {display:none;}
+        .stSelectbox > div {
+            padding: 0.1rem 0.45rem;
+            font-size: 0.9rem;
+            line-height: 1.25rem;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+lang_map = {
+    "English": "en",
+    "Hindi": "hi",
+    "Telugu": "te"
+}
+
+# Place the selector outside the title-row container
+st.markdown("<div class='lang-select'>", unsafe_allow_html=True)
+selected_lang = st.selectbox("", list(lang_map.keys()), index=0, label_visibility="collapsed")
+st.markdown("</div>", unsafe_allow_html=True)
+
+# Title row (without language selector inside)
+st.markdown("<div class='title-row'>", unsafe_allow_html=True)
+st.markdown("<span style='font-size:2rem;font-weight:bold;color:#07546B;'>🗺️ Saanchari - Andhra Pradesh Tourism Chatbot</span>", unsafe_allow_html=True)
+st.markdown("</div>", unsafe_allow_html=True)
+
+translator = Translator()
 
 # Built-in questions
 builtin_questions = [
@@ -57,13 +94,24 @@ for message in st.session_state.messages:
 if prompt := st.chat_input("Ask something about Andhra Pradesh Tourism..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
 
+# System prompt for food-related queries
+SYSTEM_PROMPT = (
+    "You are an expert on Andhra Pradesh tourism and cuisine. "
+    "Whenever asked about food, provide detailed information about famous dishes, street food, regional specialties, and culinary traditions from all parts of Andhra Pradesh."
+)
+
 # Generate response for new user message
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
-                response = model.generate_content(st.session_state.messages[-1]["content"])
+                prompt = st.session_state.messages[-1]["content"]
+                full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
+                response = model.generate_content(full_prompt)
                 reply = response.text.strip()
+                # Translate reply if needed
+                if lang_map[selected_lang] != "en":
+                    reply = translator.translate(reply, dest=lang_map[selected_lang]).text
             except Exception as e:
                 reply = f"⚠️ Gemini API Error: {str(e)}"
             st.markdown(f"<div class='bot-msg'>{reply}</div>", unsafe_allow_html=True)
