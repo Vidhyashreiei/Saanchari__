@@ -1,135 +1,151 @@
+import os
+import concurrent.futures
+from dotenv import load_dotenv
+
 import streamlit as st
 import google.generativeai as genai
+from googletrans import Translator
+from PIL import Image  # future media features
 
-from PIL import Image                                                   
-
-import os
-from dotenv import load_dotenv
-from googletrans import Translator                                      
-
-# Load environment variables from .env file
+# ────────────────────────────────────────────────────────────────
+# 1. CONFIGURATION & CACHED RESOURCES
+# ────────────────────────────────────────────────────────────────
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
 
-# Streamlit UI setup
-st.set_page_config(page_title="Saanchari-Andhra Pradesh Tourism Chatbot", layout="wide")
+@st.cache_resource(show_spinner=False)
+def get_model():
+    """Initialise the Gemini model once per session/container."""
+    genai.configure(api_key=GEMINI_API_KEY)
+    return genai.GenerativeModel("gemini-1.5-flash")
 
-# Place a compact language selector at the extreme top left of the header
-st.markdown("""
+
+@st.cache_resource(show_spinner=False)
+def get_translator():
+    """Create a single Google-trans Translator instance."""
+    return Translator()
+
+
+model = get_model()
+translator = get_translator()
+
+SYSTEM_PROMPT = (
+    "You are an expert on Andhra Pradesh tourism and cuisine. "
+    "Whenever asked about food, provide detailed information about famous dishes, "
+    "street food, regional specialties, and culinary traditions from all parts "
+    "of Andhra Pradesh."
+)
+
+LANG_MAP = {"English": "en", "Hindi": "hi", "Telugu": "te"}
+
+# ────────────────────────────────────────────────────────────────
+# 2. PAGE LAYOUT & STYLING
+# ────────────────────────────────────────────────────────────────
+st.set_page_config(page_title="Saanchari – AP Tourism Chatbot", layout="wide")
+
+# Inject CSS for compact language selector
+st.markdown(
+    """
     <style>
         .lang-select {
-            position: absolute;
-            top: 18px;
-            left: 24px;
-            background: #fff;
-            border-radius: 6px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            padding: 0.05rem 0.35rem;   /* reduced padding */
-            min-width: 80px;            /* reduced width */
-            font-size: 0.85rem;         /* smaller font */
-            z-index: 1000;
+            position:absolute; top:18px; left:24px;
+            background:#fff; border-radius:6px;
+            box-shadow:0 1px 3px rgba(0,0,0,0.08);
+            padding:0.05rem 0.35rem; font-size:0.85rem; z-index:1000;
         }
         .lang-select label {display:none;}
-        .stSelectbox > div {
-            padding: 0.05rem 0.35rem;
-            font-size: 0.85rem;
-            line-height: 1.1rem;
-        }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
-lang_map = {
-    "English": "en",
-    "Hindi": "hi",
-    "Telugu": "te"
-}
-
+# Language picker (non-empty label prevents Streamlit warning)
 st.markdown("<div class='lang-select'>", unsafe_allow_html=True)
-selected_lang = st.selectbox("", list(lang_map.keys()), index=0, label_visibility="collapsed")
+selected_lang = st.selectbox(
+    label="Language",                 # must be non-empty
+    options=list(LANG_MAP.keys()),
+    index=0,
+    label_visibility="collapsed",
+)
 st.markdown("</div>", unsafe_allow_html=True)
 
-# Title row (without language selector inside)
-st.markdown("<div class='title-row'>", unsafe_allow_html=True)
-st.markdown("<span style='font-size:2rem;font-weight:bold;color:#07546B;'>🗺️ Saanchari - Chatbot</span>", unsafe_allow_html=True)
-st.markdown("</div>", unsafe_allow_html=True)
+# Header
+st.markdown(
+    "<h1 style='color:#07546B; margin-top:0;'>🗺️ Saanchari – Andhra Pradesh Tourism Chatbot</h1>",
+    unsafe_allow_html=True,
+)
 
-translator = Translator()
-
-# Built-in questions
-builtin_questions = [
-    "What are the top tourist attractions in Andhra Pradesh?",
-    "Tell me about the famous food in Andhra Pradesh.",
-    "What is the best time to visit Andhra Pradesh?"
-]
-
-# Initialize session state
+# ────────────────────────────────────────────────────────────────
+# 3. SESSION STATE & QUICK-ACCESS QUESTIONS
+# ────────────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Built-in question buttons
-st.subheader("Quick Questions")
+BUILTIN_QUESTIONS = [
+    "What are the top tourist attractions in Andhra Pradesh?",
+    "Tell me about the famous food in Andhra Pradesh.",
+    "What is the best time to visit Andhra Pradesh?",
+]
+
 col1, col2, col3 = st.columns(3)
-if col1.button(builtin_questions[0]):
-    st.session_state.messages.append({"role": "user", "content": builtin_questions[0]})
-if col2.button(builtin_questions[1]):
-    st.session_state.messages.append({"role": "user", "content": builtin_questions[1]})
-if col3.button(builtin_questions[2]):
-    st.session_state.messages.append({"role": "user", "content": builtin_questions[2]})
+for col, text in zip((col1, col2, col3), BUILTIN_QUESTIONS):
+    if col.button(text, use_container_width=True):
+        st.session_state.messages.append({"role": "user", "content": text})
 
-# Show chat history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        if message["role"] == "user":
-            st.markdown(f"<div class='user-msg'>{message['content']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div class='bot-msg'>{message['content']}</div>", unsafe_allow_html=True)
+# ────────────────────────────────────────────────────────────────
+# 4. SHOW EXISTING CHAT HISTORY
+# ────────────────────────────────────────────────────────────────
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-# Chat input
+# ────────────────────────────────────────────────────────────────
+# 5. INPUT & RESPONSE HANDLING
+# ────────────────────────────────────────────────────────────────
 if prompt := st.chat_input("Ask something about Andhra Pradesh Tourism..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-# System prompt for food-related queries
-SYSTEM_PROMPT = (
-    "You are an expert on Andhra Pradesh tourism and cuisine. "
-    "Whenever asked about food, provide detailed information about famous dishes, street food, regional specialties, and culinary traditions from all parts of Andhra Pradesh."
-)
 
-import concurrent.futures
-
-def get_gemini_response(prompt):
+def fetch_response(user_prompt: str) -> str:
+    """Call Gemini with timeout and return plain text (or error)."""
     try:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(model.generate_content, prompt)
-            return future.result(timeout=20)  # 20 seconds timeout
-    except Exception as e:
-        return f"⚠️ Gemini API Error: {str(e)}"
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(model.generate_content, user_prompt)
+            result = future.result(timeout=20)
+        return result.text.strip()
+    except Exception as exc:
+        return f"⚠️ Gemini API Error: {exc}"
 
-# Generate response for new user message
+
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+    user_msg = st.session_state.messages[-1]["content"]
+    full_prompt = f"{SYSTEM_PROMPT}\n\n{user_msg}"
+
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            prompt = st.session_state.messages[-1]["content"]
-            full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
-            response = get_gemini_response(full_prompt)
-            reply = response.text.strip() if hasattr(response, "text") else response
+            reply = fetch_response(full_prompt)
 
-            # Translate reply if needed
-            if lang_map[selected_lang] != "en":
+            # Translate if needed
+            target_lang = LANG_MAP[selected_lang]
+            if target_lang != "en":
                 try:
-                    reply = translator.translate(reply, dest=lang_map[selected_lang]).text
-                except Exception as e:
-                    reply = f"⚠️ Translation Error: {str(e)}"
+                    reply = translator.translate(reply, dest=target_lang).text
+                except Exception as exc:
+                    reply = f"⚠️ Translation Error: {exc}"
 
-            st.markdown(f"<div class='bot-msg'>{reply}</div>", unsafe_allow_html=True)
+            st.markdown(reply)
             st.session_state.messages.append({"role": "assistant", "content": reply})
 
-# Sticky footer at the bottom
-st.markdown("""
-<div style='position: fixed; bottom: 0; left: 0; right: 0; background-color: #FFFFFF; 
-            border-top: 1px solid #CFD1D1; padding: 0.5rem; text-align: center; z-index: 999;'>
-    <small style='color: #07546B;'>© 2025 Kshipani Tech Ventures Pvt Ltd. All rights reserved.</small>
-</div>
-""", unsafe_allow_html=True)
+# ────────────────────────────────────────────────────────────────
+# 6. FOOTER
+# ────────────────────────────────────────────────────────────────
+st.markdown(
+    """
+    <div style='position:fixed; bottom:0; left:0; right:0; background:#FFF;
+                border-top:1px solid #CFD1D1; padding:0.5rem; text-align:center;'>
+        <small style='color:#07546B;'>© 2025 Kshipani Tech Ventures Pvt Ltd. All rights reserved.</small>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
